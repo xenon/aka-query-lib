@@ -1,0 +1,34 @@
+{
+  "name": "aka-query-lib",
+  "version": "1.0.0",
+  "description": "A Typescript library for query strings.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "prepublish": "npm run build",
+    "build": "tsc"
+  },
+  "keywords": [
+    "typescript",
+    "ts",
+    "query",
+    "query string",
+    "query builder",
+    "query parser"
+  ],
+  "author": "alexanderacker",
+  "license": "ISC",
+  "devDependencies": {
+    "typescript": "^3.9.7"
+  },
+  "dependencies": {
+    "aka-functional-lib": "^1.0.0"
+  },
+  "bundledDependencies": [
+    "aka-functional-lib"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://gitlab.com/alexanderacker/aka-query-lib.git"
+  }
+}
