@@ -62,7 +62,7 @@ module Query {
 		}
 		public GetErrors() { return [...this.error]; }
 		public Update(query: string, error: QueryError[]) {
-			this.query += query;
+			this.query = query + this.query;
 			this.error = error;
 		}
 	}
@@ -317,15 +317,28 @@ module Query {
 		let spec = QuerySpec.New(i).Get(() => {throw "Error invalid spec i"});
 		let spec2 = QuerySpec.New(i2).Get(() => {throw "Error invalid spec i2"});
 
+		// parse a query string into two maps
+
 		let resChain = spec.QueryFromString("?page=home&num=5&x=10&y=24").Get(() => {throw "Failed to parse string"});
 		
 		let resMap = resChain.Get();
 		console.log(resMap);
+		console.log(resChain.GetErrors());
 
 		spec2.QueryChain(resChain, true);
 
 		let resMap2 = resChain.Get();
 		console.log(resMap2);
+		console.log(resChain.GetErrors());
+
+		// build a query string from two specs
+
+		let s = spec2.StringDefault();
+		console.log(s.Get());
+		console.log(s.GetErrors());
+		spec.StringChain(s, resMap, false);
+		console.log(s.Get());
+		console.log(s.GetErrors());
 	}
 }
 
