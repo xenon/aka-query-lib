@@ -13,7 +13,7 @@ module Query {
 	type RawQuery = Map<string, string>;
 	type QueryValues<T> = Map<string, T>;
 
-	type QueryResult<T> = [[QueryValues<T>, QueryError[]], RawQuery];
+	//type QueryResult<T> = [[QueryValues<T>, QueryError[]], RawQuery];
 
 	enum QueryErrors {
 		TypeNotInEnvironment = "TypeNotInEnvironment",
@@ -24,6 +24,48 @@ module Query {
 	}
 	type QueryError = [string, QueryErrors];
 
+
+	interface ResultChain<T> {
+		Get: () => T,
+		GetErrors: () => QueryError[]
+	}
+	
+	class QueryRes<T> implements ResultChain<QueryValues<T>> {
+		private query: QueryValues<T>;
+		private error: QueryError[];
+		private chain: RawQuery;
+		constructor(chain: RawQuery) {
+			this.query = new Map();
+			this.error = [];
+			this.chain = chain;
+		}
+		public Get() { return new Map(this.query); }
+		public GetErrors() { return [...this.error]; }
+		public GetChain() { return this.chain; }
+		public Update(query: QueryValues<T>, error: QueryError[]) {
+			this.query = query;
+			this.error = error;
+		}
+	}
+
+	class QueryStr implements ResultChain<string> {
+		private query: string;
+		private error: QueryError[];
+		constructor(query: string) {
+			this.query = query;
+			this.error = [];
+		}
+		public Get() {
+			let res: string = this.query;
+			res = '?' + res.substr(1);
+			return res;	
+		}
+		public GetErrors() { return [...this.error]; }
+		public Update(query: string, error: QueryError[]) {
+			this.query += query;
+			this.error = error;
+		}
+	}
 	export class QuerySpec<T> {
 		private interface: QueryInterface<T>;
 		private types: QueryTypeEnvironment<T>;
@@ -38,33 +80,45 @@ module Query {
 			}
 			return Optional.Some(new QuerySpec(i, t));
 		}
-		public GetDefaultQuery<U>(): QueryResult<U> {
-			let e: RawQuery = new Map();
-			return ProcessRawQuery(e, this.interface, this.types, true);
+		public QueryDefault<U>(): QueryRes<U> {
+			let res = new QueryRes<U>(new Map());
+			ProcessRawQuery(res, this.interface, this.types, true);
+			return res!;
 		} 
-		public QueryFromString<U>(str: string, insertDefaultVal: boolean = false): Optional<QueryResult<U>> {
+		public QueryFromString<U>(str: string, insertDefaultVal: boolean = false): Optional<QueryRes<U>> {
 			let rawQuery = GetRawQuery(str);
 			return rawQuery.Match(
-				(val) => { return Optional.Some(ProcessRawQuery<T, U>(val, this.interface, this.types, insertDefaultVal)) },
-				() => { return Optional.None<[[QueryValues<U>, QueryError[]], RawQuery]>() }
+				(val) => {
+					let res = new QueryRes<U>(val);
+					ProcessRawQuery<T, U>(res, this.interface, this.types, insertDefaultVal);
+					return Optional.Some(res);
+				},
+				() => { return Optional.None<QueryRes<U>>() }
 			);
 		}
-		public QueryChain<U, V>(res: QueryResult<V>, insertDefaultVal: boolean = false): QueryResult<U> {
-			return ProcessRawQuery<T,U>(res[1], this.interface, this.types, insertDefaultVal);
+		public QueryChain<U>(res: QueryRes<U>, insertDefaultVal: boolean = false): void {
+			ProcessRawQuery<T,U>(res, this.interface, this.types, insertDefaultVal);
 		}
-		public QueryFromStringWithDefault<U>(str: string, insertDefaultVal: boolean = false): QueryResult<U> {
+		public QueryFromStringWithDefault<U>(str: string, insertDefaultVal: boolean = false): QueryRes<U> {
 			let q = this.QueryFromString<U>(str, insertDefaultVal);
 			return q.Match(
 				(val) => { return val; },
-				() => { return this.GetDefaultQuery<U>(); }
+				() => { return this.QueryDefault<U>(); }
 			);
 		}
-		public GetDefaultString(): [string, QueryError[]] {
-			let d = this.GetDefaultQuery<T>();
-			return BuildQueryString<T>(d[0][0], this.interface, this.types, true);
+		public StringDefault(): QueryStr {
+			let d = this.QueryDefault<T>();
+			let s = new QueryStr("");
+			BuildQueryString<T>(s, d.Get(), this.interface, this.types, true);
+			return s;
 		}
-		public StringFromQuery(query: QueryValues<T>, insertDefaultVal: boolean = false): [string, QueryError[]] {
-			return BuildQueryString<T>(query, this.interface, this.types, insertDefaultVal);
+		public StringFromQuery(query: QueryValues<T>, insertDefaultVal: boolean = false): QueryStr {
+			let s = new QueryStr("");
+			BuildQueryString<T>(s, query, this.interface, this.types, insertDefaultVal);
+			return s;
+		}
+		public StringChain(res: QueryStr, query: QueryValues<T>, insertDefaultVal: boolean = false): void {
+			BuildQueryString(res, query, this.interface, this.types, insertDefaultVal);
 		}
 	}
 
@@ -89,7 +143,7 @@ module Query {
 
 	// Assume VerifyTypeEnvironment(interf, env) = []
 	// Assume query has no duplicates (it's impossible anyways)
-	function ProcessRawQuery<T, U>(query: RawQuery, interf: QueryInterface<T>, env: QueryTypeEnvironment<T>, insertDefaultVal: boolean = false): [[QueryValues<U>, QueryError[]], RawQuery] {
+	function ProcessRawQuery<T, U>(res: QueryRes<U>, interf: QueryInterface<T>, env: QueryTypeEnvironment<T>, insertDefaultVal: boolean = false): void {
 		function insertDefault(val: QueryInterfaceItem<T>, q: QueryValues<T>): void {
 			if (insertDefaultVal === true) {
 				q.set(val[0], val[2]);
@@ -97,6 +151,7 @@ module Query {
 		}
 		let typedQuery = new Map();
 		let errorList: QueryError[] = [];
+		let query = res.GetChain();
 		for (let i = 0; i < interf.length; ++i) {
 			const valToFind: QueryInterfaceItem<any> = interf[i];
 			if (!query.has(valToFind[0])) {
@@ -128,17 +183,14 @@ module Query {
 			);
 			query.delete(valToFind[0]); // chain the query
 		}
-		return [[typedQuery, errorList], query];
+		// update state object
+		res.Update(typedQuery, errorList);
 	}
 
-	function BuildQueryString<T>(query: QueryValues<T>, interf: QueryInterface<T>, env: QueryTypeEnvironment<T>, insertDefaultVal: boolean = false): [string, QueryError[]] {
+	function BuildQueryString<T>(res: QueryStr, query: QueryValues<T>, interf: QueryInterface<T>, env: QueryTypeEnvironment<T>, insertDefaultVal: boolean = false): void {
 		function insertQuery(q: string[], key: string, val: string): void {
 			let pStr = key + '=' + val;
-			if (q.length !== 1) {
-				q.push('&' + pStr);
-			} else {
-				q.push(pStr);
-			}
+			q.push('&' + pStr);
 		}
 		function insertDefault(val: QueryInterfaceItem<T>, q: string[]): void {
 			if (insertDefaultVal === true) {
@@ -152,7 +204,7 @@ module Query {
 				}
 			} 
 		}
-		let strQuery: string[] = ['?'];
+		let strQuery: string[] = [''];
 		let errorList: QueryError[] = [];
 		for (let i = 0; i < interf.length; ++i) {
 			const valToFind: QueryInterfaceItem<any> = interf[i];
@@ -173,10 +225,7 @@ module Query {
 			}
 			insertQuery(strQuery, valToFind[0], result);
 		}
-		if (strQuery.length === 1) {
-			return ['', errorList];
-		}
-		return [strQuery.join(''), errorList];
+		res.Update(strQuery.join(''), errorList);
 	}
 
 	// Functions to verify if interfaces and type environments work properly
@@ -202,15 +251,6 @@ module Query {
 		return errorList;
 	}
 
-	export function GetQuery<T>(res: QueryResult<T>): QueryValues<T> {
-		return res[0][0];
-	}
-
-	export function GetErrors<T>(res: QueryResult<T>): QueryError[] {
-		return res[0][1];
-	}
-
-
 	export function UnionTypeEnvironment<T, U>(t1: QueryTypeEnvironment<T>, t2: QueryTypeEnvironment<U>): Optional<QueryTypeEnvironment<T | U>> {
 		let res = new Map();
 		for (let [key, val] of t1) {
@@ -230,6 +270,12 @@ module Query {
 		["page", "string", "home", (x: string) => x === "home"],
 		["num", "integer", 0]
 	];
+
+	export const i2: QueryInterface<any> = [
+		["x", "integer", 12],
+		["y", "integer", 64],
+		["z", "integer", 32]
+	]
 
 	export const env: QueryTypeEnvironment<any> = new Map([
 		["string",
@@ -266,7 +312,21 @@ module Query {
 		],
 	]);
 
-	export const res = ProcessRawQuery(GetRawQuery("?page=home&num=5&x=10&y=24").Get(() => {throw "Error"}), i, env);
+	//export const res = ProcessRawQuery(GetRawQuery("?page=home&num=5&x=10&y=24").Get(() => {throw "Error"}), i, env);
+	function test() {
+		let spec = QuerySpec.New(i).Get(() => {throw "Error invalid spec i"});
+		let spec2 = QuerySpec.New(i2).Get(() => {throw "Error invalid spec i2"});
+
+		let resChain = spec.QueryFromString("?page=home&num=5&x=10&y=24").Get(() => {throw "Failed to parse string"});
+		
+		let resMap = resChain.Get();
+		console.log(resMap);
+
+		spec2.QueryChain(resChain, true);
+
+		let resMap2 = resChain.Get();
+		console.log(resMap2);
+	}
 }
 
 export {
