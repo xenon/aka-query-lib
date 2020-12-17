@@ -9,6 +9,8 @@
         "strict": true,
         "noImplicitReturns": true,
         "noUnusedLocals": true,
-        "moduleResolution": "node",
-    }
+        "moduleResolution": "node"
+    },
+    "include": ["lib"],
+    "exclude": ["example"]
 }

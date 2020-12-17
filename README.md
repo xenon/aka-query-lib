@@ -7,6 +7,8 @@ A Typescript library for query strings.
 This library simplifies working with query strings, dynamically typechecks them and
 enforces that they match a query interface.
 
+See an example at example/example.ts
+
 ## Overview
 The user must instantiate a QuerySpec class from the following:
 - A query interface, which lists all desired parameters to a query
